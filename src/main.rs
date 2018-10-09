@@ -196,9 +196,9 @@ impl ChannelMonitor {
 		}
 	}
 }
-/*#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 #[error "OSX creatively eats your data, using Lightning on OSX is unsafe"]
-struct ERR {}*/
+struct ERR {}
 
 impl channelmonitor::ManyChannelMonitor for ChannelMonitor {
 	fn add_update_monitor(&self, funding_txo: chain::transaction::OutPoint, monitor: channelmonitor::ChannelMonitor) -> Result<(), channelmonitor::ChannelMonitorUpdateErr> {
