@@ -1,3 +1,5 @@
+#![recursion_limit="128"]
+
 extern crate futures;
 extern crate hyper;
 extern crate serde_json;
@@ -15,6 +17,9 @@ extern crate base64;
 extern crate bitcoin_bech32;
 extern crate bitcoin_hashes;
 extern crate crypto;
+
+#[macro_use]
+extern crate if_chain;
 
 #[macro_use]
 extern crate serde_derive;
@@ -228,21 +233,20 @@ impl ChannelMonitor {
 		for file_option in fs::read_dir(&self.file_prefix).unwrap() {
 			let mut loaded = false;
 			let file = file_option.unwrap();
-			if let Some(filename) = file.file_name().to_str() {
-				if filename.is_ascii() && filename.len() > 65 {
-					if let Ok(txid) = Sha256dHash::from_hex(filename.split_at(64).0) {
-						if let Ok(index) = filename.split_at(65).1.split('.').next().unwrap().parse() {
-							if let Ok(contents) = fs::read(&file.path()) {
-								if let Ok(loaded_monitor) = channelmonitor::ChannelMonitor::read(&mut Cursor::new(&contents)) {
-									if let Ok(_) = self.monitor.add_update_monitor(chain::transaction::OutPoint { txid, index }, loaded_monitor) {
-										loaded = true;
-									}
-								}
-							}
-						}
-					}
+
+			if_chain! {
+				if let Some(filename) = file.file_name().to_str();
+				if filename.is_ascii() && filename.len() > 65;
+				if let Ok(txid) = Sha256dHash::from_hex(filename.split_at(64).0);
+				if let Ok(index) = filename.split_at(65).1.split('.').next().unwrap().parse();
+				if let Ok(contents) = fs::read(&file.path());
+				if let Ok(loaded_monitor) = channelmonitor::ChannelMonitor::read(&mut Cursor::new(&contents));
+				if let Ok(_) = self.monitor.add_update_monitor(chain::transaction::OutPoint { txid, index }, loaded_monitor);
+				then {
+					loaded = true;
 				}
 			}
+
 			if !loaded {
 				println!("WARNING: Failed to read one of the channel monitor storage files! Check perms!");
 			}
