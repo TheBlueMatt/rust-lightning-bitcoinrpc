@@ -70,7 +70,7 @@ use std::io::{Cursor, Write};
 use std::fs;
 
 const FEE_PROPORTIONAL_MILLIONTHS: u32 = 10;
-const ANNOUNCE_CHANNELS: bool = false;
+const ANNOUNCE_CHANNELS: bool = true;
 
 #[allow(dead_code, unreachable_code)]
 fn _check_usize_is_64() {
@@ -136,18 +136,24 @@ impl EventHandler {
 						println!("Broadcast funding tx {}!", tx.txid());
 					},
 					Event::PaymentReceived { payment_hash, amt } => {
-						let images = us.payment_preimages.lock().unwrap();
-						if let Some(payment_preimage) = images.get(&payment_hash) {
-							if us.channel_manager.claim_funds(payment_preimage.clone(), amt) { // Cheating by using amt here!
-								println!("Moneymoney! {} id {}", amt, hex_str(&payment_hash.0));
+						println!("handling pr in 60 secs...");
+						let us = us.clone();
+						let self_sender = self_sender.clone();
+						tokio::spawn(tokio::timer::Delay::new(Instant::now() + Duration::from_secs(60)).then(move |_| {
+							let images = us.payment_preimages.lock().unwrap();
+							if let Some(payment_preimage) = images.get(&payment_hash) {
+								if us.channel_manager.claim_funds(payment_preimage.clone(), amt) { // Cheating by using amt here!
+									println!("Moneymoney! {} id {}", amt, hex_str(&payment_hash.0));
+								} else {
+									println!("Failed to claim money we were told we had?");
+								}
 							} else {
-								println!("Failed to claim money we were told we had?");
+								us.channel_manager.fail_htlc_backwards(&payment_hash);
+								println!("Received payment but we didn't know the preimage :(");
 							}
-						} else {
-							us.channel_manager.fail_htlc_backwards(&payment_hash);
-							println!("Received payment but we didn't know the preimage :(");
-						}
-						let _ = self_sender.try_send(());
+							let _ = self_sender.try_send(());
+							Ok(())
+						}));
 					},
 					Event::PaymentSent { payment_preimage } => {
 						println!("Less money :(, proof: {}", hex_str(&payment_preimage.0));
@@ -219,6 +225,7 @@ impl ChannelMonitor {
 									res.push((chain::transaction::OutPoint { txid, index }, loaded_monitor));
 									loaded = true;
 								}
+else { println!("deser"); }
 							}
 						}
 					}
@@ -477,7 +484,7 @@ fn main() {
 		println!("'l p' List the node_ids of all connected peers");
 		println!("'l c' List details about all channels");
 		println!("'s invoice [amt]' Send payment to an invoice, optionally with amount as whole msat if its not in the invoice");
-		println!("'p' Gets a new invoice for receiving funds");
+		println!("'p value' Gets a new invoice for receiving funds");
 		print!("> "); std::io::stdout().flush().unwrap();
 		tokio::spawn(tokio_codec::FramedRead::new(tokio_fs::stdin(), tokio_codec::LinesCodec::new()).for_each(move |line| {
 			macro_rules! fail_return {
@@ -670,6 +677,15 @@ fn main() {
 						payment_preimages.lock().unwrap().insert(PaymentHash(payment_hash.into_inner()), PaymentPreimage(payment_preimage));
 						println!("payment_hash: {}", hex_str(&payment_hash.into_inner()));
 
+						/*let chans = channel_manager.list_usable_channels().drain(..).map(|chan| {
+							vec![lightning_invoice::RouteHop {
+								pubkey: chan.remote_network_id,
+								short_channel_id: be64_to_array(chan.short_channel_id),
+								fee_base_msat: ,
+								fee_proportional_millionths: ,
+								cltv_expiry_delta: ,
+							}]
+						}).collect();*/
 						let invoice_res = lightning_invoice::InvoiceBuilder::new(match network {
 								constants::Network::Bitcoin => lightning_invoice::Currency::Bitcoin,
 								constants::Network::Testnet => lightning_invoice::Currency::BitcoinTestnet,
