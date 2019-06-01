@@ -51,7 +51,7 @@ use std::io::{Cursor, Write};
 use std::fs;
 
 const FEE_PROPORTIONAL_MILLIONTHS: u32 = 10;
-const ANNOUNCE_CHANNELS: bool = false;
+const ANNOUNCE_CHANNELS: bool = true;
 
 // TODO: There are several dropped tokio::JoinHandle's in this file where we call tokio::spawn and then
 // drop the result. In the future, this may break things, see https://github.com/tokio-rs/tokio/issues/1830.
@@ -229,6 +229,7 @@ impl ChannelMonitor {
 									res.push((chain::transaction::OutPoint { txid, index }, loaded_monitor));
 									loaded = true;
 								}
+else { println!("deser"); }
 							}
 						}
 					}
@@ -492,7 +493,7 @@ async fn main() {
 	println!("'l p' List the node_ids of all connected peers");
 	println!("'l c' List details about all channels");
 	println!("'s invoice [amt]' Send payment to an invoice, optionally with amount as whole msat if its not in the invoice");
-	println!("'p' Gets a new invoice for receiving funds");
+	println!("'p value' Gets a new invoice for receiving funds");
 	print!("> "); std::io::stdout().flush().unwrap();
 	let mut lines = BufReader::new(tokio::io::stdin()).lines();
 	while let Ok(Some(line)) = lines.next_line().await {
@@ -691,6 +692,15 @@ async fn main() {
 					payment_preimages.lock().unwrap().insert(PaymentHash(payment_hash.into_inner()), PaymentPreimage(payment_preimage));
 					println!("payment_hash: {}", hex_str(&payment_hash.into_inner()));
 
+					/*let chans = channel_manager.list_usable_channels().drain(..).map(|chan| {
+						vec![lightning_invoice::RouteHop {
+							pubkey: chan.remote_network_id,
+							short_channel_id: be64_to_array(chan.short_channel_id),
+							fee_base_msat: ,
+							fee_proportional_millionths: ,
+							cltv_expiry_delta: ,
+						}]
+					}).collect();*/
 					let invoice_res = lightning_invoice::InvoiceBuilder::new(match network {
 							constants::Network::Bitcoin => lightning_invoice::Currency::Bitcoin,
 							constants::Network::Testnet => lightning_invoice::Currency::BitcoinTestnet,
