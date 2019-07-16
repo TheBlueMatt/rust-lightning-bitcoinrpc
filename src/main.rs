@@ -19,6 +19,9 @@ extern crate bitcoin_hashes;
 #[macro_use]
 extern crate serde_derive;
 
+mod argman;
+use argman::ArgMan;
+
 mod rpc_client;
 use rpc_client::*;
 
