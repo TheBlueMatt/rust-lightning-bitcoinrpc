@@ -19,6 +19,8 @@ extern crate bitcoin_hashes;
 #[macro_use]
 extern crate serde_derive;
 
+mod argman;
+
 mod rpc_client;
 use rpc_client::*;
 
@@ -63,7 +65,7 @@ use bitcoin_hashes::Hash;
 use bitcoin_hashes::sha256d::Hash as Sha256dHash;
 use bitcoin_hashes::hex::{ToHex, FromHex};
 
-use std::{env, mem};
+use std::mem;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -315,19 +317,27 @@ impl Logger for LogPrinter {
 	}
 }
 
-fn main() {
-	println!("USAGE: rust-lightning-jsonrpc user:pass@rpc_host:port storage_directory_path [port]");
-	if env::args().len() < 3 { return; }
+fn create_global_args() -> argman::ArgMan {
+	let mut g_args = argman::ArgMan::new();
+	g_args.add_arg("-chain", "regtest".to_string(), "Selected chain/network to operate with");
+	g_args.add_arg("-p2pport", "9735".to_string(), "Port to listen to as a p2p lightning node");
+	g_args.add_arg("-rpchost", "localhost:18443".to_string(), "bitcoind RPC host to connect to");
+	g_args.add_arg_unset("-rpcauth", "bitcoind RPC auth (example: -rpcauth=user:pass)");
+	g_args.add_arg_unset("-datadir", "Storage directory path");
 
-	let rpc_client = {
-		let path = env::args().skip(1).next().unwrap();
-		let path_parts: Vec<&str> = path.split('@').collect();
-		if path_parts.len() != 2 {
-			println!("Bad RPC URL provided");
-			return;
-		}
-		Arc::new(RPCClient::new(path_parts[0], path_parts[1]))
-	};
+	g_args
+}
+
+fn main() {
+	let mut g_args = create_global_args();
+	if !g_args.parse_args() {
+		println!("EXAMPLE USAGE: rust-lightning-jsonrpc -chain=regtest -rpcauth=user:pass -datadir=storage_directory_path [-p2pport=port] [regtest.-rpc_host=rpc_host:port] ");
+		return;
+	}
+	g_args.print_selected_args();
+
+	let chain = g_args.get("-chain");
+	let rpc_client = Arc::new(RPCClient::new(g_args.get("-rpcauth"), g_args.get("-rpchost")));
 
 	let mut network = constants::Network::Bitcoin;
 	let secp_ctx = Secp256k1::new();
@@ -340,6 +350,7 @@ fn main() {
 		thread_rt.block_on(rpc_client.make_rpc_call("getblockchaininfo", &[], false).and_then(|v| {
 			assert!(v["verificationprogress"].as_f64().unwrap() > 0.99);
 			assert_eq!(v["bip9_softforks"]["segwit"]["status"].as_str().unwrap(), "active");
+			assert_eq!(v["chain"].as_str().unwrap(), chain);
 			match v["chain"].as_str().unwrap() {
 				"main" => network = constants::Network::Bitcoin,
 				"test" => network = constants::Network::Testnet,
@@ -355,21 +366,14 @@ fn main() {
 		panic!("LOL, you're insane");
 	}
 
-	let data_path = env::args().skip(2).next().unwrap();
+	let data_path = g_args.get("-datadir").to_string();
 	if !fs::metadata(&data_path).unwrap().is_dir() {
 		println!("Need storage_directory_path to exist and be a directory (or symlink to one)");
 		return;
 	}
 	let _ = fs::create_dir(data_path.clone() + "/monitors"); // If it already exists, ignore, hopefully perms are ok
 
-	let port: u16 = match env::args().skip(3).next().map(|p| p.parse()) {
-		Some(Ok(p)) => p,
-		Some(Err(e)) => {
-			println!("Error parsing port.");
-			return;
-		},
-		None => 9735,
-	};
+	let port: u16 = g_args.get("-p2pport").parse().unwrap();
 
 	let logger = Arc::new(LogPrinter {});
 
