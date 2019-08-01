@@ -217,7 +217,7 @@ impl ChannelMonitor {
 					if let Ok(txid) = Sha256dHash::from_hex(filename.split_at(64).0) {
 						if let Ok(index) = filename.split_at(65).1.split('.').next().unwrap().parse() {
 							if let Ok(contents) = fs::read(&file.path()) {
-								if let Ok((last_block_hash, loaded_monitor)) = <(Sha256dHash, channelmonitor::ChannelMonitor)>::read(&mut Cursor::new(&contents), Arc::new(LogPrinter{})) {
+								if let Ok((_last_block_hash, loaded_monitor)) = <(Sha256dHash, channelmonitor::ChannelMonitor)>::read(&mut Cursor::new(&contents), Arc::new(LogPrinter{})) {
 									// TODO: Rescan from last_block_hash
 									res.push((chain::transaction::OutPoint { txid, index }, loaded_monitor));
 									loaded = true;
@@ -364,7 +364,7 @@ fn main() {
 
 	let port: u16 = match env::args().skip(3).next().map(|p| p.parse()) {
 		Some(Ok(p)) => p,
-		Some(Err(e)) => {
+		Some(Err(_e)) => {
 			println!("Error parsing port.");
 			return;
 		},
@@ -413,7 +413,7 @@ fn main() {
 		config.channel_options.announced_channel = ANNOUNCE_CHANNELS;
 
 		let channel_manager = if let Ok(mut f) = fs::File::open(data_path.clone() + "/manager_data") {
-			let (last_block_hash, manager) = {
+			let (_last_block_hash, manager) = {
 				let mut monitors_refs = HashMap::new();
 				for (outpoint, monitor) in monitors_loaded.iter() {
 					monitors_refs.insert(*outpoint, monitor);
@@ -430,7 +430,7 @@ fn main() {
 				}).expect("Failed to deserialize channel manager")
 			};
 			monitor.load_from_vec(monitors_loaded);
-			//TODO: Rescan
+			// TODO: Rescan from last_block_hash
 			let manager = Arc::new(manager);
 			let manager_as_listener: Arc<chaininterface::ChainListener> = manager.clone();
 			chain_monitor.register_listener(Arc::downgrade(&manager_as_listener));
