@@ -8,8 +8,8 @@ build = "build.rs"
 bitcoin = "0.18"
 bitcoin-bech32 = "0.7"
 bitcoin_hashes = "0.3"
-lightning = "0.0.9"
-lightning-net-tokio = "0.0.1"
+lightning = { path = "../rust-lightning" }
+lightning-net-tokio = { path = "../rust-lightning/net-tokio" }
 lightning-invoice = "0.2"
 secp256k1 = "0.12"
 hyper = "0.12"

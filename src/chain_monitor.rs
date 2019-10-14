@@ -143,7 +143,7 @@ impl chaininterface::BroadcasterInterface for ChainInterface {
 }
 
 enum ForkStep {
-	DisconnectBlock(bitcoin::blockdata::block::BlockHeader),
+	DisconnectBlock(bitcoin::blockdata::block::BlockHeader, u32),
 	ConnectBlock((String, u32)),
 }
 fn find_fork_step(steps_tx: mpsc::Sender<ForkStep>, current_header: GetHeaderResponse, target_header_opt: Option<(String, GetHeaderResponse)>, rpc_client: Arc<RPCClient>) {
@@ -167,7 +167,7 @@ fn find_fork_step(steps_tx: mpsc::Sender<ForkStep>, current_header: GetHeaderRes
 	} else {
 		let target_header = target_header_opt.unwrap().1;
 		// Everything below needs to disconnect target, so go ahead and do that now
-		tokio::spawn(steps_tx.send(ForkStep::DisconnectBlock(target_header.to_block_header())).then(move |send_res| {
+		tokio::spawn(steps_tx.send(ForkStep::DisconnectBlock(target_header.to_block_header(), target_header.height)).then(move |send_res| {
 			if let Ok(steps_tx) = send_res {
 				future::Either::A(if target_header.previousblockhash == current_header.previousblockhash {
 					// Found the fork, also connect current and finish!
@@ -256,9 +256,9 @@ pub fn spawn_chain_monitor(fee_estimator: Arc<FeeEstimator>, rpc_client: Arc<RPC
 			future::Either::B(events_rx.collect().then(move |events_res| {
 				let events = events_res.unwrap();
 				for event in events.iter().rev() {
-					if let &ForkStep::DisconnectBlock(ref header) = &event {
+					if let &ForkStep::DisconnectBlock(ref header, height) = &event {
 						println!("Disconnecting block {}", header.bitcoin_hash().to_hex());
-						chain_monitor.util.block_disconnected(header);
+						chain_monitor.util.block_disconnected(header, *height);
 					}
 				}
 				let mut connect_futures = Vec::with_capacity(events.len());

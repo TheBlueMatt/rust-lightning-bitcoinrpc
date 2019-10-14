@@ -73,6 +73,7 @@ use std::vec::Vec;
 use std::time::{Instant, Duration};
 use std::io::{Cursor, Write};
 use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const FEE_PROPORTIONAL_MILLIONTHS: u32 = 10;
 const ANNOUNCE_CHANNELS: bool = false;
@@ -163,7 +164,8 @@ impl EventHandler {
 					Event::PendingHTLCsForwardable { time_forwardable } => {
 						let us = us.clone();
 						let mut self_sender = self_sender.clone();
-						tokio::spawn(tokio::timer::Delay::new(time_forwardable).then(move |_| {
+						let forward_event = Instant::now() + time_forwardable;
+						tokio::spawn(tokio::timer::Delay::new(forward_event).then(move |_| {
 							us.channel_manager.process_pending_htlc_forwards();
 							let _ = self_sender.try_send(());
 							Ok(())
@@ -390,7 +392,8 @@ fn main() {
 		f.sync_all().expect("Failed to sync seed to disk");
 		key
 	};
-	let keys = Arc::new(KeysManager::new(&our_node_seed, network, logger.clone()));
+	let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards");
+	let keys = Arc::new(KeysManager::new(&our_node_seed, network, logger.clone(), now.as_secs(), now.subsec_nanos()));
 	let (import_key_1, import_key_2) = bip32::ExtendedPrivKey::new_master(network, &our_node_seed).map(|extpriv| {
 		(extpriv.ckd_priv(&secp_ctx, bip32::ChildNumber::from_hardened_idx(1).unwrap()).unwrap().private_key.key,
 		 extpriv.ckd_priv(&secp_ctx, bip32::ChildNumber::from_hardened_idx(2).unwrap()).unwrap().private_key.key)
@@ -447,10 +450,13 @@ fn main() {
 		};
 		let router = Arc::new(router::Router::new(PublicKey::from_secret_key(&secp_ctx, &keys.get_node_secret()), chain_monitor.clone(), logger.clone()));
 
+		let mut rng = thread_rng();
+		let mut ephemeral_bytes = [0; 32];
+		rng.fill_bytes(&mut ephemeral_bytes);
 		let peer_manager = Arc::new(peer_handler::PeerManager::new(peer_handler::MessageHandler {
 			chan_handler: channel_manager.clone(),
 			route_handler: router.clone(),
-		}, keys.get_node_secret(), logger.clone()));
+		}, keys.get_node_secret(), &ephemeral_bytes, logger.clone()));
 
 		let payment_preimages = Arc::new(Mutex::new(HashMap::new()));
 		let mut event_notify = EventHandler::setup(network, data_path, rpc_client.clone(), peer_manager.clone(), monitor.monitor.clone(), channel_manager.clone(), chain_monitor.clone(), payment_preimages.clone());
