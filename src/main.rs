@@ -135,20 +135,20 @@ impl EventHandler {
 						us.broadcaster.broadcast_transaction(&tx);
 						println!("Broadcast funding tx {}!", tx.txid());
 					},
-					Event::PaymentReceived { payment_hash, amt } => {
+					Event::PaymentReceived { payment_hash, payment_secret, amt } => {
 						println!("handling pr in 60 secs...");
 						let us = us.clone();
-						let self_sender = self_sender.clone();
+						let mut self_sender = self_sender.clone();
 						tokio::spawn(tokio::timer::Delay::new(Instant::now() + Duration::from_secs(60)).then(move |_| {
 							let images = us.payment_preimages.lock().unwrap();
 							if let Some(payment_preimage) = images.get(&payment_hash) {
-								if us.channel_manager.claim_funds(payment_preimage.clone(), amt) { // Cheating by using amt here!
+								if us.channel_manager.claim_funds(payment_preimage.clone(), &payment_secret, amt) { // Cheating by using amt here!
 									println!("Moneymoney! {} id {}", amt, hex_str(&payment_hash.0));
 								} else {
 									println!("Failed to claim money we were told we had?");
 								}
 							} else {
-								us.channel_manager.fail_htlc_backwards(&payment_hash);
+								us.channel_manager.fail_htlc_backwards(&payment_hash, &payment_secret);
 								println!("Received payment but we didn't know the preimage :(");
 							}
 							let _ = self_sender.try_send(());
@@ -176,12 +176,29 @@ impl EventHandler {
 								SpendableOutputDescriptor:: StaticOutput { outpoint, .. } => {
 									println!("Got on-chain output Bitcoin Core should know how to claim at {}:{}", hex_str(&outpoint.txid[..]), outpoint.vout);
 								},
-								SpendableOutputDescriptor::DynamicOutputP2WSH { .. } => {
-									println!("Got on-chain output we should claim...");
-									//TODO: Send back to Bitcoin Core!
+								SpendableOutputDescriptor::DynamicOutputP2WSH { outpoint, key, witness_script, to_self_delay, output } => {
+									println!("Got on-chain output ({}:{}) to redeemScript {} spendable with key {} at time {}...", hex_str(&outpoint.txid[..]), outpoint.vout, hex_str(&witness_script[..]), hex_str(&key[..]), to_self_delay);
+									let tx = bitcoin::Transaction {
+										input: vec![bitcoin::TxIn {
+											previous_output: outpoint,
+											script_sig: bitcoin::Script::new(),
+											sequence: to_self_delay as u32,
+											witness: vec![witness_script.to_vec()],
+										}],
+										lock_time: 0,
+										output: vec![bitcoin::TxOut {
+											script_pubkey: 
+											value: output.value,
+										}],
+										version: 2,
+									};
+									//XXX: Sign!
 								},
-								SpendableOutputDescriptor::DynamicOutputP2WPKH { .. } => {
+								SpendableOutputDescriptor::DynamicOutputP2WPKH { outpoint, key, output } => {
 									println!("Got on-chain output we should claim...");
+									tokio::spawn(rpc_client.make_rpc_call("importprivkey",
+											&[&("\"".to_string() + &bitcoin::util::key::PrivateKey{ key: import_key_2, compressed: true, network}.to_wif() + "\""), "\"rust-lightning cooperative close\"", "false"], false)
+											.then(|_| Ok(())));
 									//TODO: Send back to Bitcoin Core!
 								},
 							}
@@ -407,7 +424,7 @@ fn main() {
 				&[&("\"".to_string() + &bitcoin::util::key::PrivateKey{ key: import_key_2, compressed: true, network}.to_wif() + "\""), "\"rust-lightning cooperative close\"", "false"], false)
 				.then(|_| Ok(())));
 
-		let monitors_loaded = ChannelMonitor::load_from_disk(&(data_path.clone() + "/monitors"));
+		let mut monitors_loaded = ChannelMonitor::load_from_disk(&(data_path.clone() + "/monitors"));
 		let monitor = Arc::new(ChannelMonitor {
 			monitor: channelmonitor::SimpleManyChannelMonitor::new(chain_monitor.clone(), chain_monitor.clone(), logger.clone(), fee_estimator.clone()),
 			file_prefix: data_path.clone() + "/monitors",
@@ -421,7 +438,7 @@ fn main() {
 		let channel_manager = if let Ok(mut f) = fs::File::open(data_path.clone() + "/manager_data") {
 			let (last_block_hash, manager) = {
 				let mut monitors_refs = HashMap::new();
-				for (outpoint, monitor) in monitors_loaded.iter() {
+				for (outpoint, monitor) in monitors_loaded.iter_mut() {
 					monitors_refs.insert(*outpoint, monitor);
 				}
 				<(Sha256dHash, channelmanager::ChannelManager<InMemoryChannelKeys>)>::read(&mut f, channelmanager::ChannelManagerReadArgs {
@@ -432,7 +449,7 @@ fn main() {
 					tx_broadcaster: chain_monitor.clone(),
 					logger: logger.clone(),
 					default_config: config,
-					channel_monitors: &monitors_refs,
+					channel_monitors: &mut monitors_refs,
 				}).expect("Failed to deserialize channel manager")
 			};
 			monitor.load_from_vec(monitors_loaded);
@@ -648,7 +665,7 @@ fn main() {
 										Ok(route) => {
 											let mut payment_hash = PaymentHash([0; 32]);
 											payment_hash.0.copy_from_slice(&invoice.payment_hash()[..]);
-											match channel_manager.send_payment(route, payment_hash) {
+											match channel_manager.send_payment(route, payment_hash, None) {
 												Ok(()) => {
 													println!("Sending {} msat", amt);
 													let _ = event_notify.try_send(());
