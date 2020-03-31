@@ -564,6 +564,7 @@ async fn main() {
 	println!("'f all' Force close all channels, closing to chain");
 	println!("'l p' List the node_ids of all connected peers");
 	println!("'l c' List details about all channels");
+	println!("'l g' List details about all network graph");
 	println!("'s invoice [amt]' Send payment to an invoice, optionally with amount as whole msat if its not in the invoice");
 	println!("'p amt' Gets a new invoice for receiving funds for the given amt in msat");
 	print!("> "); std::io::stdout().flush().unwrap();
@@ -690,6 +691,16 @@ async fn main() {
 							} else {
 								println!("id: {}, not yet confirmed, peer: {}, value: {} sat, live: {}", hex_str(&chan_info.channel_id[..]), hex_str(&chan_info.remote_network_id.serialize()), chan_info.channel_value_satoshis, chan_info.is_live);
 							}
+						}
+					} else if line.as_bytes()[2] == 'g' as u8 {
+						let graph = router.list_graph();
+						println!("All channels:");
+						for chan in graph.0.iter() {
+							println!("short_id: {}, node_a: {} node_b: {} enabled_a: {} enabled_b: {}", chan.short_channel_id, chan.a_node_id, chan.b_node_id, chan.a_enabled, chan.b_enabled);
+						}
+						println!("All vertices:");
+						for node in graph.1.iter() {
+							println!("node_id: {} last_update: {}", node.node_id, node.last_update);
 						}
 					} else {
 						println!("Listing of non-peer/channel objects not yet implemented");
